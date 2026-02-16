@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.33801.198
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Keyswitch", "Keyswitch\Keyswitch.vcxproj", "{4C5594A1-A84A-4568-BFCA-7362AD449004}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Debug|x64.ActiveCfg = Debug|x64
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Debug|x64.Build.0 = Debug|x64
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Debug|x86.ActiveCfg = Debug|Win32
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Debug|x86.Build.0 = Debug|Win32
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Release|x64.ActiveCfg = Release|x64
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Release|x64.Build.0 = Release|x64
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Release|x86.ActiveCfg = Release|Win32
+		{4C5594A1-A84A-4568-BFCA-7362AD449004}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3727C72F-774C-44F4-87F3-455EFC879266}
+	EndGlobalSection
+EndGlobal
