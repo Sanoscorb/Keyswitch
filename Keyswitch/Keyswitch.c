@@ -1,67 +1,442 @@
-﻿#include "framework.h"
+#include <WinSDKVer.h>
+#define _WIN32_WINNT _WIN32_WINNT_WINXP
+#include <SDKDDKVer.h>
+
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <CommCtrl.h>
+#include <Shlwapi.h>
+#include <ctype.h>
+#include <tchar.h>
+#include <strsafe.h>
+
 #include "Keyswitch.h"
 
 #define MAX_LOADSTRING 100
 
-HINSTANCE hInst;
 TCHAR szTitle[MAX_LOADSTRING];
 TCHAR szWindowClass[MAX_LOADSTRING];
 
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
-
-int APIENTRY _tWinMain(_In_     HINSTANCE hInstance, 
-                       _In_opt_ HINSTANCE hPrevInstance,
-                       _In_     LPTSTR    lpCmdLine, 
-                       _In_     int       nCmdShow)
+BOOL KS_WritePrivateProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, UINT uValue, LPCTSTR lpszPath)
 {
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+    TCHAR szBuffer[8];
+    ZeroMemory(szBuffer, sizeof(szBuffer));
+    StringCchPrintf(szBuffer, _countof(szBuffer), _T("%u"), uValue);
+    return WritePrivateProfileString(lpszSection, lpszKey, szBuffer, lpszPath);
+}
 
+void GetConfigPath(LPTSTR lpszBuffer)
+{
+    TCHAR szPath[MAX_PATH];
+    TCHAR szConfigName[MAX_LOADSTRING];
+    GetModuleFileName(NULL, szPath, _countof(szPath));
+    LoadString(GetModuleHandle(NULL), IDS_CONFIG_PATH, szConfigName, _countof(szConfigName));
+    PathRemoveFileSpec(szPath);
+    PathCombine(lpszBuffer, szPath, szConfigName);
+}
+
+void LoadSettings(KS_USERDATA* lpUserData)
+{
+    TCHAR szPath[MAX_PATH];
+    GetConfigPath(szPath);
+
+    lpUserData->isToggle = (BOOL)!!GetPrivateProfileInt(szTitle, _T("ToggleLayouts"), 0, szPath);
+    lpUserData->uEscAction = GetPrivateProfileInt(szTitle, _T("EscapeAction"), 0, szPath);
+    lpUserData->uLastCurKl = GetPrivateProfileInt(szTitle, _T("CurrentLayout"), 0, szPath);
+    lpUserData->uLastAltKl = GetPrivateProfileInt(szTitle, _T("AlternateLayout"), 1, szPath);
+}
+
+void SaveSettings(const KS_USERDATA userData)
+{
+    TCHAR szPath[MAX_PATH];
+    GetConfigPath(szPath);
+
+    KS_WritePrivateProfileInt(szTitle, _T("ToggleLayouts"), (UINT)(userData.isToggle), szPath);
+    KS_WritePrivateProfileInt(szTitle, _T("EscapeAction"), userData.uEscAction, szPath);
+    KS_WritePrivateProfileInt(szTitle, _T("CurrentLayout"), userData.uLastCurKl, szPath);
+    KS_WritePrivateProfileInt(szTitle, _T("AlternateLayout"), userData.uLastAltKl, szPath);
+}
+
+LPTSTR SwitchLayouts(LPTSTR lpszDst, HKL hklDst, LPCTSTR lpszSrc, HKL hklSrc)
+{
+    if (lpszDst == NULL || lpszSrc == NULL)
+    {
+        return NULL;
+    }
+
+    BYTE keyState[256];
+    SHORT vkCode;
+    for (int i = 0; lpszSrc[i] != '\0'; i++)
+    {
+        vkCode = VkKeyScanEx(lpszSrc[i], hklSrc);
+        BOOL isKeyState = GetKeyboardState(keyState);
+        if (vkCode == -1 || !isKeyState || _istcntrl(lpszSrc[i]))
+        {
+            lpszDst[i] = lpszSrc[i];
+        }
+        else
+        {
+            keyState[VK_SHIFT] = (BYTE)((HIBYTE(vkCode) & 1) != 0 ? 0x80 : 0);
+#ifdef UNICODE
+            ToUnicodeEx(vkCode, 0, keyState, &lpszDst[i], 1, 0, hklDst);
+#else
+            ToAsciiEx(vkCode, 0, keyState, &lpszDst[i], 0, hklDst);
+#endif
+        }
+    }
+    return lpszDst;
+}
+
+INT_PTR CALLBACK AboutBox(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_INITDIALOG:
+        return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        EndDialog(hDlg, LOWORD(wParam));
+        return (INT_PTR)TRUE;
+    }
+    return (INT_PTR)FALSE;
+}
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_GETMINMAXINFO:
+    {
+        LPMINMAXINFO lpmmi = (LPMINMAXINFO)lParam;
+        lpmmi->ptMinTrackSize.x = WINDOW_WIDTH;
+        lpmmi->ptMinTrackSize.y = WINDOW_HEIGHT;
+    }
+    break;
+
+    case WM_CREATE:
+    {
+        KS_USERDATA* lpUserData = HeapAlloc(GetProcessHeap(),
+            HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, sizeof(KS_USERDATA));
+        if (lpUserData == NULL)
+        {
+            return -1;
+        }
+        LoadSettings(lpUserData);
+        SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)lpUserData);
+
+        HMENU hMenu = GetMenu(hWnd);
+        if (lpUserData->isToggle)
+        {
+            CheckMenuItem(hMenu, ID_VIEW_TOGGLE, MF_BYCOMMAND | MF_CHECKED);
+        }
+
+        UINT uEscCheck;
+        switch (lpUserData->uEscAction)
+        {
+        case ESC_EXIT:
+            uEscCheck = ID_VIEW_ESC_EXIT;
+            break;
+
+        case ESC_MINIMIZE:
+            uEscCheck = ID_VIEW_ESC_MIN;
+            break;
+
+        default:
+            uEscCheck = ID_VIEW_ESC_NOACT;
+            break;
+        }
+        CheckMenuRadioItem(GetMenu(hWnd),
+            ID_VIEW_ESC_NOACT, ID_VIEW_ESC_MIN,
+            uEscCheck, MF_BYCOMMAND);
+
+        NONCLIENTMETRICS ncm;
+        ncm.cbSize = sizeof(NONCLIENTMETRICS);
+        SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+        HFONT hFont = CreateFontIndirect(&ncm.lfMessageFont);
+
+        HWND hEditBox = CreateWindowEx(WS_EX_CLIENTEDGE, WC_EDIT, NULL,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOHSCROLL,
+            0, 0, WINDOW_WIDTH, CTRL_HEIGHT,
+            hWnd, (HMENU)IDC_EDITBOX, GetModuleHandle(NULL), NULL);
+        SendMessage(hEditBox, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        HWND hCurKlCbox = CreateWindow(WC_COMBOBOX, NULL,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+            0, 0, WINDOW_WIDTH, CTRL_HEIGHT,
+            hWnd, (HMENU)IDC_CUR_KL_COMBO, GetModuleHandle(NULL), NULL);
+        SendMessage(hCurKlCbox, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        HWND hAltKlCbox = CreateWindow(WC_COMBOBOX, NULL,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+            0, 0, WINDOW_WIDTH, CTRL_HEIGHT,
+            hWnd, (HMENU)IDC_ALT_KL_COMBO, GetModuleHandle(NULL), NULL);
+        SendMessage(hAltKlCbox, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        int nhkl = GetKeyboardLayoutList(0, NULL);
+        LPHKL ahkl = HeapAlloc(GetProcessHeap(),
+            HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, nhkl * sizeof(HKL));
+        if (ahkl == NULL)
+        {
+            HeapFree(GetProcessHeap(), 0, lpUserData);
+            return -1;
+        }
+        GetKeyboardLayoutList(nhkl, ahkl);
+        TCHAR szLanguage[LOCALE_NAME_MAX_LENGTH];
+        TCHAR szCountry[LOCALE_NAME_MAX_LENGTH];
+        TCHAR szhkl[LOCALE_NAME_MAX_LENGTH];
+        for (int i = 0; i < nhkl; i++)
+        {
+            ZeroMemory(szLanguage, sizeof(szLanguage));
+            ZeroMemory(szCountry, sizeof(szCountry));
+            ZeroMemory(szhkl, sizeof(szhkl));
+            GetLocaleInfo(MAKELCID(LOWORD(ahkl[i]), SORT_DEFAULT),
+                LOCALE_SENGLANGUAGE, szLanguage, _countof(szLanguage));
+            GetLocaleInfo(MAKELCID(LOWORD(ahkl[i]), SORT_DEFAULT),
+                LOCALE_SENGCOUNTRY, szCountry, _countof(szCountry));
+            StringCchPrintf(szhkl, _countof(szhkl), _T("%s (%s)"), szLanguage, szCountry);
+            SendMessage(hCurKlCbox, CB_ADDSTRING, 0, (LPARAM)szhkl);
+            SendMessage(hCurKlCbox, CB_SETITEMDATA, i, (LPARAM)ahkl[i]);
+            SendMessage(hAltKlCbox, CB_ADDSTRING, 0, (LPARAM)szhkl);
+            SendMessage(hAltKlCbox, CB_SETITEMDATA, i, (LPARAM)ahkl[i]);
+        }
+        SendMessage(hCurKlCbox, CB_SETCURSEL, (WPARAM)(lpUserData->uLastCurKl % nhkl), 0);
+        SendMessage(hAltKlCbox, CB_SETCURSEL, (WPARAM)(lpUserData->uLastAltKl % nhkl), 0);
+        HeapFree(GetProcessHeap(), 0, ahkl);
+
+        TCHAR szButton[MAX_LOADSTRING];
+        LoadString(GetModuleHandle(NULL), IDS_SWITCH_BUTTON, szButton, _countof(szButton));
+        HWND hSwitchBtn = CreateWindow(WC_BUTTON, szButton,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+            0, 0, WINDOW_WIDTH, CTRL_HEIGHT,
+            hWnd, (HMENU)IDC_SWITCH_BUTTON, GetModuleHandle(NULL), NULL);
+        SendMessage(hSwitchBtn, WM_SETFONT, (WPARAM)hFont, TRUE);
+    }
+    break;
+
+    case WM_SIZE:
+    {
+        HWND hEditBox = GetDlgItem(hWnd, IDC_EDITBOX);
+        HWND hCurKlCbox = GetDlgItem(hWnd, IDC_CUR_KL_COMBO);
+        HWND hAltKlCbox = GetDlgItem(hWnd, IDC_ALT_KL_COMBO);
+        HWND hSwitchBtn = GetDlgItem(hWnd, IDC_SWITCH_BUTTON);
+
+        int cx = LOWORD(lParam);
+        int cy = HIWORD(lParam);
+
+        int xEditBox = CTRL_PADDING;
+        int yEditBox = CTRL_PADDING;
+        int cxEditBox = cx - 2 * CTRL_PADDING;
+        int cyEditBox = cy - 2 * CTRL_HEIGHT - 4 * CTRL_PADDING - 1;
+
+        int ySwitchBtn = cy - CTRL_PADDING - CTRL_HEIGHT;
+
+        int yCbox = ySwitchBtn - CTRL_PADDING - CTRL_HEIGHT;
+        int cxCbox = (cxEditBox - CTRL_GAP) / 2 + (cxEditBox - CTRL_GAP) % 2;
+
+        MoveWindow(hEditBox, xEditBox, yEditBox,
+            cxEditBox, cyEditBox, TRUE);
+
+        MoveWindow(hCurKlCbox, xEditBox, yCbox,
+            cxCbox, CTRL_HEIGHT, TRUE);
+
+        MoveWindow(hAltKlCbox, xEditBox + cxCbox + CTRL_GAP, yCbox,
+            cxCbox, CTRL_HEIGHT, TRUE);
+
+        MoveWindow(hSwitchBtn, xEditBox, ySwitchBtn,
+            cxEditBox, CTRL_HEIGHT, TRUE);
+    }
+    break;
+
+    case WM_COMMAND:
+    {
+        KS_USERDATA* lpUserData = (KS_USERDATA*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+        switch (LOWORD(wParam))
+        {
+        case IDC_CUR_KL_COMBO:
+        case IDC_ALT_KL_COMBO:
+        {
+            if (HIWORD(wParam) == CBN_SELCHANGE)
+            {
+                HWND hCbox1 = (HWND)lParam;
+                HWND hCbox2 = NULL;
+                if (LOWORD(wParam) == IDC_CUR_KL_COMBO)
+                {
+                    hCbox2 = GetDlgItem(hWnd, IDC_ALT_KL_COMBO);
+                }
+                else if (LOWORD(wParam) == IDC_ALT_KL_COMBO)
+                {
+                    hCbox2 = GetDlgItem(hWnd, IDC_CUR_KL_COMBO);
+                }
+                else
+                {
+                    return 0;
+                }
+
+                int iCbox1 = (int)SendMessage(hCbox1, CB_GETCURSEL, 0, 0);
+                int iCbox2 = (int)SendMessage(hCbox2, CB_GETCURSEL, 0, 0);
+                int nCbox2 = (int)SendMessage(hCbox1, CB_GETCOUNT, 0, 0);
+
+                if (iCbox1 == CB_ERR || iCbox2 == CB_ERR || nCbox2 <= 0)
+                {
+                    return 0;
+                }
+
+                if (iCbox1 == iCbox2)
+                {
+                    int i = (iCbox2 + 1) % nCbox2;
+                    SendMessage(hCbox2, CB_SETCURSEL, (WPARAM)i, 0);
+                }
+            }
+        }
+        break;
+
+        case IDC_SWITCH_BUTTON:
+        {
+            if (HIWORD(wParam) == BN_CLICKED)
+            {
+                HWND hCurKlCbox = GetDlgItem(hWnd, IDC_CUR_KL_COMBO);
+                HWND hAltKlCbox = GetDlgItem(hWnd, IDC_ALT_KL_COMBO);
+                int iCurKlCbox = (int)SendMessage(hCurKlCbox, CB_GETCURSEL, 0, 0);
+                int iAltKlCbox = (int)SendMessage(hAltKlCbox, CB_GETCURSEL, 0, 0);
+                HKL hklCur = (HKL)SendMessage(hCurKlCbox, CB_GETITEMDATA, iCurKlCbox, 0);
+                HKL hklAlt = (HKL)SendMessage(hAltKlCbox, CB_GETITEMDATA, iAltKlCbox, 0);
+
+                HWND hEditBox = GetDlgItem(hWnd, IDC_EDITBOX);
+                int nEditBox = GetWindowTextLength(hEditBox);
+                if (nEditBox > 0)
+                {
+                    LPTSTR szEditBox = HeapAlloc(GetProcessHeap(),
+                        HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, (nEditBox + 1) * sizeof(TCHAR));
+                    if (szEditBox == NULL)
+                    {
+                        return 0;
+                    }
+                    GetWindowText(hEditBox, szEditBox, nEditBox + 1);
+                    SwitchLayouts(szEditBox, hklAlt, szEditBox, hklCur);
+                    SetWindowText(hEditBox, szEditBox);
+                    HeapFree(GetProcessHeap(), 0, szEditBox);
+
+                    if (lpUserData->isToggle)
+                    {
+                        SendMessage(hCurKlCbox, CB_SETCURSEL, (WPARAM)iAltKlCbox, 0);
+                        SendMessage(hAltKlCbox, CB_SETCURSEL, (WPARAM)iCurKlCbox, 0);
+                    }
+                    lpUserData->uLastCurKl = (UINT)iCurKlCbox;
+                    lpUserData->uLastAltKl = (UINT)iAltKlCbox;
+                }
+            }
+        }
+        break;
+
+        case ID_ESCAPE:
+        {
+            switch (lpUserData->uEscAction)
+            {
+            case ESC_EXIT:
+                SendMessage(hWnd, WM_CLOSE, 0, 0);
+                break;
+
+            case ESC_MINIMIZE:
+                ShowWindow(hWnd, SW_MINIMIZE);
+                break;
+
+            default:
+                break;
+            }
+        }
+        break;
+
+        case ID_FILE_EXIT:
+            SendMessage(hWnd, WM_CLOSE, 0, 0);
+            break;
+
+        case ID_HELP_ABOUT:
+            DialogBox(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, AboutBox);
+            break;
+
+        case ID_VIEW_TOGGLE:
+        {
+            lpUserData->isToggle = !(lpUserData->isToggle);
+            UINT uCheck = (lpUserData->isToggle) ? MF_CHECKED : MF_UNCHECKED;
+            CheckMenuItem(GetMenu(hWnd), ID_VIEW_TOGGLE, uCheck | MF_BYCOMMAND);
+        }
+        break;
+
+        case ID_VIEW_ESC_NOACT:
+        case ID_VIEW_ESC_EXIT:
+        case ID_VIEW_ESC_MIN:
+        {
+            CheckMenuRadioItem(GetMenu(hWnd),
+                ID_VIEW_ESC_NOACT, ID_VIEW_ESC_MIN,
+                LOWORD(wParam), MF_BYCOMMAND);
+
+            switch (LOWORD(wParam))
+            {
+            case ID_VIEW_ESC_NOACT:
+                lpUserData->uEscAction = ESC_NO_ACT;
+                break;
+
+            case ID_VIEW_ESC_EXIT:
+                lpUserData->uEscAction = ESC_EXIT;
+                break;
+
+            case ID_VIEW_ESC_MIN:
+                lpUserData->uEscAction = ESC_MINIMIZE;
+                break;
+
+            default:
+                break;
+            }
+        }
+        break;
+
+        default:
+            return DefWindowProc(hWnd, uMsg, wParam, lParam);
+        }
+    }
+    break;
+
+    case WM_CLOSE:
+    {
+        KS_USERDATA* lpUserData = (KS_USERDATA*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+        SaveSettings(*lpUserData);
+        HeapFree(GetProcessHeap(), 0, lpUserData);
+        DestroyWindow(hWnd);
+    }
+    break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    return 0;
+}
+
+int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
+{
     INITCOMMONCONTROLSEX iccex;
     iccex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     iccex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;
     if (!InitCommonControlsEx(&iccex))
     {
-        return EXIT_FAILURE;
+        return 1;
     }
 
-    LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadString(hInstance, IDC_KEYSWITCH, szWindowClass, MAX_LOADSTRING);
-    MyRegisterClass(hInstance);
+    LoadString(hInstance, IDS_APP_TITLE, szTitle, _countof(szTitle));
+    LoadString(hInstance, IDC_KEYSWITCH, szWindowClass, _countof(szWindowClass));
 
     if (GetKeyboardLayoutList(0, NULL) < 2)
     {
         TCHAR szMessage[MAX_LOADSTRING];
-        LoadString(hInst, IDS_LESS_THAN_2, szMessage, MAX_LOADSTRING);
-        MessageBox(NULL, szMessage, szTitle, MB_OK | MB_ICONERROR);
-        return EXIT_FAILURE;
+        LoadString(hInstance, IDS_LESS_THAN_2, szMessage, _countof(szMessage));
+        MessageBox(NULL, szMessage, szTitle, MB_OK | MB_ICONHAND);
+        return 1;
     }
 
-    if (!InitInstance(hInstance, nCmdShow))
-    {
-        return EXIT_FAILURE;
-    }
-
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_KEYSWITCH));
-
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0))
-    {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-
-    return (int)msg.wParam;
-}
-
-ATOM MyRegisterClass(HINSTANCE hInstance)
-{
     WNDCLASSEX wcex;
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -76,255 +451,39 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.lpszClassName = szWindowClass;
     wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_KEYSWITCH), IMAGE_ICON, 16, 16, 0);
 
-    return RegisterClassEx(&wcex);
-}
-
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
-{
-   hInst = hInstance;
-
-   HWND hWnd = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-       CW_USEDEFAULT, CW_USEDEFAULT, 
-       WINDOW_WIDTH, WINDOW_HEIGHT, NULL, NULL, hInst, NULL);
-
-   if (!hWnd)
-   {
-      return FALSE;
-   }
-
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
-
-   return TRUE;
-}
-
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
+    if (!RegisterClassEx(&wcex))
     {
-    case WM_CREATE:
-        {
-            NONCLIENTMETRICS ncm;
-            ncm.cbSize = sizeof(NONCLIENTMETRICS);
-            SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-            HFONT hFont = CreateFontIndirect(&ncm.lfMessageFont);
-
-            HWND hEditBox = CreateWindow(WC_EDIT, NULL,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
-                0, 0, 200, 24, hWnd, (HMENU)IDC_EDITBOX, hInst, NULL);
-            SendMessage(hEditBox, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-            HWND hCurKlCbox = CreateWindow(WC_COMBOBOX, NULL,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWN | CBS_DROPDOWNLIST,
-                0, 0, 200, 24, hWnd, (HMENU)IDC_CUR_KL_COMBO, hInst, NULL);
-            SendMessage(hCurKlCbox, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-            HWND hAltKlCbox = CreateWindow(WC_COMBOBOX, NULL,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWN | CBS_DROPDOWNLIST,
-                0, 0, 200, 24, hWnd, (HMENU)IDC_ALT_KL_COMBO, hInst, NULL);
-            SendMessage(hAltKlCbox, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-            int nhkl = GetKeyboardLayoutList(0, NULL);
-            LPHKL ahkl = HeapAlloc(GetProcessHeap(),
-                HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY, nhkl * sizeof(HKL));
-            GetKeyboardLayoutList(nhkl, ahkl);
-            TCHAR szhkl[LOCALE_NAME_MAX_LENGTH];
-            for (int i = 0; i < nhkl; i++)
-            {
-                ZeroMemory(szhkl, LOCALE_NAME_MAX_LENGTH * sizeof(TCHAR));
-                GetLocaleInfo(MAKELCID(LOWORD(ahkl[i]), SORT_DEFAULT), 
-                    LOCALE_SENGLANGUAGE, szhkl, LOCALE_NAME_MAX_LENGTH);
-                SendMessage(hCurKlCbox, CB_ADDSTRING, 0, (LPARAM)szhkl);
-                SendMessage(hCurKlCbox, CB_SETITEMDATA, i, (LPARAM)ahkl[i]);
-                SendMessage(hAltKlCbox, CB_ADDSTRING, 0, (LPARAM)szhkl);
-                SendMessage(hAltKlCbox, CB_SETITEMDATA, i, (LPARAM)ahkl[i]);
-            }
-            SendMessage(hCurKlCbox, CB_SETCURSEL, 0, 0);
-            SendMessage(hAltKlCbox, CB_SETCURSEL, 1, 0);
-            HeapFree(GetProcessHeap(), 0, ahkl);
-
-            TCHAR szButton[MAX_LOADSTRING];
-            LoadString(hInst, IDS_SWITCH_BUTTON, szButton, MAX_LOADSTRING);
-            HWND hSwitchBtn = CreateWindow(WC_BUTTON, szButton,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                0, 0, 200, 24, hWnd, (HMENU)IDC_SWITCH_BUTTON, hInst, NULL);
-            SendMessage(hSwitchBtn, WM_SETFONT, (WPARAM)hFont, TRUE);
-        }
-        break;
-    case WM_GETMINMAXINFO:
-        {
-            LPMINMAXINFO lpmmi = (LPMINMAXINFO)lParam;
-            lpmmi->ptMinTrackSize.x = WINDOW_WIDTH;
-            lpmmi->ptMaxTrackSize.x = WINDOW_WIDTH;
-            lpmmi->ptMinTrackSize.y = WINDOW_HEIGHT;
-            lpmmi->ptMaxTrackSize.y = WINDOW_HEIGHT;
-            return 0;
-        }
-        break;
-    case WM_SIZE:
-        {
-            HWND hEditBox = GetDlgItem(hWnd, IDC_EDITBOX);
-            HWND hCurKlCbox = GetDlgItem(hWnd, IDC_CUR_KL_COMBO);
-            HWND hAltKlCbox = GetDlgItem(hWnd, IDC_ALT_KL_COMBO);
-            HWND hSwitchBtn = GetDlgItem(hWnd, IDC_SWITCH_BUTTON);
-
-            int nWndWidth = LOWORD(lParam);
-            int nWndHeight = HIWORD(lParam);
-
-            int nCtrlPadding = 7;
-            int nCtrlHeight = 24;
-            int nCtrlGap = nCtrlPadding;
-
-            int nEditX = nCtrlPadding;
-            int nEditY = nCtrlPadding;
-            int nEditWidth = nWndWidth - 2 * nCtrlPadding;
-
-            int nComboY = nEditY + nCtrlHeight + nCtrlPadding;
-            int nComboWidth = (nEditWidth - nCtrlGap) / 2;
-            int nComboRem = (nEditWidth - nCtrlGap) % 2;
-
-            int nButtonY = nComboY + nCtrlHeight + nCtrlPadding;
-
-            MoveWindow(hEditBox, nEditX, nEditY,
-                nEditWidth, nCtrlHeight, TRUE);
-
-            MoveWindow(hCurKlCbox, nEditX, nComboY,
-                nComboWidth, nCtrlHeight, TRUE);
-
-            MoveWindow(hAltKlCbox, nEditX + nComboWidth + nCtrlGap, nComboY,
-                nComboWidth + nComboRem, nCtrlHeight, TRUE);
-
-            MoveWindow(hSwitchBtn, nEditX, nButtonY,
-                nEditWidth, nCtrlHeight, TRUE);
-        }
-        break;
-    case WM_COMMAND:
-        {
-            WORD wId = LOWORD(wParam);
-            WORD wCmd = HIWORD(wParam);
-            HWND hCtrl = (HWND)lParam;
-
-            HWND hCurKlCbox = GetDlgItem(hWnd, IDC_CUR_KL_COMBO);
-            HWND hAltKlCbox = GetDlgItem(hWnd, IDC_ALT_KL_COMBO);
-
-            if (wCmd == 0 && hCtrl == NULL)
-            {
-                switch (wId)
-                {
-                case ID_HELP_ABOUT:
-                    DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                    break;
-                case ID_FILE_EXIT:
-                    DestroyWindow(hWnd);
-                    break;
-                default:
-                    return DefWindowProc(hWnd, message, wParam, lParam);
-                }
-            }
-            else if (wCmd == CBN_SELCHANGE)
-            {
-                HWND hOtherCbox = NULL;
-                if (hCtrl == hCurKlCbox)
-                {
-                    hOtherCbox = hAltKlCbox;
-                }
-                else if (hCtrl == hAltKlCbox)
-                {
-                    hOtherCbox = hCurKlCbox;
-                }
-                else 
-                {
-                    return 0;
-                }
-
-                int iThisCbox = (int)SendMessage(hCtrl, CB_GETCURSEL, 0, 0);
-                int iOtherCbox = (int)SendMessage(hOtherCbox, CB_GETCURSEL, 0, 0);
-                int nOtherCbox = (int)SendMessage(hOtherCbox, CB_GETCOUNT, 0, 0);
-
-                if (iThisCbox == CB_ERR || iOtherCbox == CB_ERR || nOtherCbox <= 0)
-                {
-                    return 0;
-                }
-
-                if (iThisCbox == iOtherCbox)
-                {
-                    int i = (iOtherCbox + 1) % nOtherCbox;
-                    SendMessage(hOtherCbox, CB_SETCURSEL, (WPARAM)i, 0);
-                }
-            }
-            else if (wCmd == BN_CLICKED)
-            {
-                int iCurKlCbox = (int)SendMessage(hCurKlCbox, CB_GETCURSEL, 0, 0);
-                int iAltKlCbox = (int)SendMessage(hAltKlCbox, CB_GETCURSEL, 0, 0);
-
-                HKL hklCur = (HKL)SendMessage(hCurKlCbox, CB_GETITEMDATA, iCurKlCbox, 0);
-                HKL hklAlt = (HKL)SendMessage(hAltKlCbox, CB_GETITEMDATA, iAltKlCbox, 0);
-
-                HWND hEditBox = GetDlgItem(hWnd, IDC_EDITBOX);
-                int nEditBox = GetWindowTextLength(hEditBox);
-                if (nEditBox > 0)
-                {
-                    LPTSTR szEditBox = HeapAlloc(GetProcessHeap(),
-                        HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY, 
-                        (nEditBox + 1) * sizeof(TCHAR));
-                    if (szEditBox == NULL)
-                    {
-                        return 0;
-                    }
-                    GetWindowText(hEditBox, szEditBox, nEditBox + 1);
-
-                    BYTE mods, keyState[256];
-                    SHORT vkCode;
-                    for (int i = 0; i < nEditBox; i++)
-                    {
-                        vkCode = VkKeyScanEx(szEditBox[i], hklCur);
-                        BOOL isKeyState = GetKeyboardState(keyState);
-                        if (vkCode == -1 || !isKeyState)
-                        {
-                            continue;
-                        }
-                        /* To detect capital letter. */
-                        mods = (BYTE)((vkCode >> 8) & 0xFF);
-                        keyState[0x10] = (BYTE)((mods & 1) != 0 ? 0x80 : 0);
-#ifdef UNICODE
-                        ToUnicodeEx(vkCode, 0, keyState, &szEditBox[i], 1, 0, hklAlt);
-#else
-                        ToAsciiEx(vkCode, 0, keyState, &szEditBox[i], 0, hklAlt);
-#endif
-                    }
-                    SetWindowText(hEditBox, szEditBox);
-                    SendMessage(hCurKlCbox, CB_SETCURSEL, (WPARAM)iAltKlCbox, 0);
-                    SendMessage(hAltKlCbox, CB_SETCURSEL, (WPARAM)iCurKlCbox, 0);
-                    HeapFree(GetProcessHeap(), 0, szEditBox);
-                }
-            }
-            return 0;
-        }
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        return 1;
     }
-    return 0;
-}
 
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    UNREFERENCED_PARAMETER(lParam);
-    switch (message)
+    int cxScreen = GetSystemMetrics(SM_CXSCREEN);
+    int cyScreen = GetSystemMetrics(SM_CYSCREEN);
+    int x = (cxScreen - WINDOW_WIDTH) / 2;
+    int y = (cyScreen - WINDOW_HEIGHT) / 2;
+
+    HWND hWnd = CreateWindow(szWindowClass, szTitle,
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX,
+        x, y, WINDOW_WIDTH, WINDOW_HEIGHT, NULL, NULL, hInstance, NULL);
+
+    if (hWnd == NULL)
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
-
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
-        {
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR) TRUE;
-        }
-        break;
+        return 1;
     }
-    return (INT_PTR) FALSE;
+
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+
+    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_KEYSWITCH));
+
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0))
+    {
+        if (!TranslateAccelerator(hWnd, hAccelTable, &msg))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+
+    return (int)msg.wParam;
 }
