@@ -25,6 +25,25 @@ BOOL KS_WritePrivateProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, UINT uValue
     return WritePrivateProfileString(lpszSection, lpszKey, szBuffer, lpszPath);
 }
 
+BOOL SimpleVerQueryValue(LPBYTE lpBlock, DWORD dwTranslate, LPCTSTR szSubBlock, LPVOID* lplpValue, LPUINT lpuLen)
+{
+    if (lpBlock == NULL || szSubBlock == NULL || lplpValue == NULL || lpuLen == NULL )
+    {
+        return FALSE;
+    }
+    
+    TCHAR szQuery[MAX_LOADSTRING];
+    ZeroMemory(szQuery, _countof(szQuery));
+    HRESULT hr = StringCchPrintf(szQuery, _countof(szQuery),
+        _T("\\StringFileInfo\\%04x%04x\\%s"),
+        LOWORD(dwTranslate), HIWORD(dwTranslate), szSubBlock);
+    if (SUCCEEDED(hr))
+    {
+        return VerQueryValue(lpBlock, szQuery, lplpValue, lpuLen);
+    }
+    return FALSE;
+}
+
 void GetConfigPath(LPTSTR lpszBuffer)
 {
     TCHAR szPath[MAX_PATH];
@@ -87,18 +106,74 @@ LPTSTR SwitchLayouts(LPTSTR lpszDst, HKL hklDst, LPCTSTR lpszSrc, HKL hklSrc)
     return lpszDst;
 }
 
-INT_PTR CALLBACK AboutBox(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+void AboutMsgBox(HWND hWnd)
 {
-    switch (uMsg)
+    TCHAR szFileName[MAX_PATH];
+    GetModuleFileName(NULL, szFileName, MAX_PATH);
+    
+    DWORD dwSize = GetFileVersionInfoSize(szFileName, NULL);
+    if (dwSize == 0)
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
-
-    case WM_COMMAND:
-        EndDialog(hDlg, LOWORD(wParam));
-        return (INT_PTR)TRUE;
+        return;
     }
-    return (INT_PTR)FALSE;
+    LPBYTE lpBlock = HeapAlloc(GetProcessHeap(),
+        HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, dwSize);
+    if (lpBlock == NULL)
+    {
+        return;
+    }
+    if (!GetFileVersionInfo(szFileName, 0, dwSize, lpBlock))
+    {
+        goto AboutMsgBoxEnd;
+    }
+
+    LPVOID lpValue;
+    UINT uLen;
+    LPDWORD lpdwTranslate;
+    TCHAR szMessage[MAX_LOADSTRING];
+    LPTSTR lpszEnd;
+    DWORD_PTR dwRemaining;
+    ZeroMemory(szMessage, _countof(szMessage));
+    
+    if (!VerQueryValue(lpBlock, _T("\\VarFileInfo\\Translation"), (LPVOID*)&lpdwTranslate, &uLen) ||
+        (uLen % sizeof(DWORD)) != 0)
+    {
+        goto AboutMsgBoxEnd;
+    }
+    
+    if (SimpleVerQueryValue(lpBlock, *lpdwTranslate, _T("ProductVersion"), &lpValue, &uLen))
+    {
+        HRESULT hr = StringCchPrintfEx(szMessage, _countof(szMessage),
+            &lpszEnd, &dwRemaining, 0, _T("Version %s\n"), (LPTSTR)lpValue);
+        if (FAILED(hr))
+        {
+            goto AboutMsgBoxEnd;
+        }
+    }
+    
+    if (SimpleVerQueryValue(lpBlock, *lpdwTranslate, _T("LegalCopyright"), &lpValue, &uLen))
+    {
+        HRESULT hr = StringCchCopyEx(lpszEnd, dwRemaining, (LPTSTR)lpValue,
+            &lpszEnd, &dwRemaining, 0);
+        if (FAILED(hr))
+        {
+            goto AboutMsgBoxEnd;
+        }
+    }
+    
+    MSGBOXPARAMS mbp;
+    ZeroMemory(&mbp, sizeof(mbp));
+    mbp.cbSize = sizeof(MSGBOXPARAMS);
+    mbp.hwndOwner = hWnd;
+    mbp.hInstance = GetModuleHandle(NULL);
+    mbp.lpszText = szMessage;
+    mbp.lpszCaption = szTitle;
+    mbp.dwStyle = MB_OK | MB_USERICON;
+    mbp.lpszIcon = MAKEINTRESOURCE(IDI_KEYSWITCH);
+    MessageBoxIndirect(&mbp);
+
+AboutMsgBoxEnd:
+    HeapFree(GetProcessHeap(), 0, lpBlock);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -351,7 +426,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             break;
 
         case ID_HELP_ABOUT:
-            DialogBox(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, AboutBox);
+            AboutMsgBox(hWnd);
             break;
 
         case ID_VIEW_TOGGLE:

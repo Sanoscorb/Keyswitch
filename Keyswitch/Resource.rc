@@ -3,8 +3,8 @@
 
 /* Version */
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1, 0, 0, 0
-PRODUCTVERSION 1, 0, 0, 0
+FILEVERSION 1, 1, 0, 0
+PRODUCTVERSION 1, 1, 0, 0
 FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -21,10 +21,10 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Sanoscorb"
             VALUE "FileDescription", "Layout switcher"
-            VALUE "FileVersion", "1.0.0.0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 Sanoscorb"
+            VALUE "FileVersion", "1.1.0.0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Sanoscorb"
             VALUE "ProductName", "Keyswitch"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "1.1.0.0"
         END
     END
 
@@ -71,18 +71,6 @@ IDC_KEYSWITCH ACCELERATORS
 BEGIN
     VK_ESCAPE, ID_ESCAPE, VIRTKEY, NOINVERT
     VK_F1, ID_HELP_ABOUT, VIRTKEY, NOINVERT
-END
-
-/* Dialogs */
-IDD_ABOUTBOX DIALOGEX 0, 0, 170, 62
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "About Keyswitch"
-FONT 8, "MS Shell Dlg", 0, 0, 0x1
-BEGIN
-    ICON IDI_KEYSWITCH, IDC_STATIC, 14, 14, 20, 20
-    LTEXT "Keyswitch, Version 1.0", IDC_STATIC, 42, 14, 114, 8
-    LTEXT "Copyright (C) 2025 Sanoscorb", IDC_STATIC, 42, 26, 114, 8
-    DEFPUSHBUTTON "OK", IDOK, 113, 41, 50, 14
 END
 
 /* Strings */

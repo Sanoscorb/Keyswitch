@@ -8,17 +8,14 @@
 /* Menu and Accelerators */
 #define IDC_KEYSWITCH       101
 
-/* Dialogs */
-#define IDD_ABOUTBOX        102
-
 /* Strings */
-#define IDS_APP_TITLE       103
-#define IDS_CONFIG_PATH     104
-#define IDS_LESS_THAN_2     105
-#define IDS_SWITCH_BUTTON   106
+#define IDS_APP_TITLE       102
+#define IDS_CONFIG_PATH     103
+#define IDS_LESS_THAN_2     104
+#define IDS_SWITCH_BUTTON   105
 
 /* Icons */
-#define IDI_KEYSWITCH       107
+#define IDI_KEYSWITCH       106
 
 /* Main controls */
 #define IDC_EDITBOX         1000
