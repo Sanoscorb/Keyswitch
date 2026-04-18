@@ -10,12 +10,11 @@
 
 /* Strings */
 #define IDS_APP_TITLE       102
-#define IDS_CONFIG_PATH     103
-#define IDS_LESS_THAN_2     104
-#define IDS_SWITCH_BUTTON   105
+#define IDS_LESS_THAN_2     103
+#define IDS_SWITCH_BUTTON   104
 
 /* Icons */
-#define IDI_KEYSWITCH       106
+#define IDI_KEYSWITCH       105
 
 /* Main controls */
 #define IDC_EDITBOX         1000

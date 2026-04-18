@@ -23,6 +23,7 @@ BEGIN
             VALUE "FileDescription", "Layout switcher"
             VALUE "FileVersion", "1.1.0.0"
             VALUE "LegalCopyright", "Copyright (C) 2026 Sanoscorb"
+            VALUE "OriginalFilename", "Keyswitch.exe"
             VALUE "ProductName", "Keyswitch"
             VALUE "ProductVersion", "1.1.0.0"
         END
@@ -79,7 +80,6 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 BEGIN
     IDC_KEYSWITCH "KEYSWITCH"
     IDS_APP_TITLE "Keyswitch"
-    IDS_CONFIG_PATH "Keyswitch.ini"
     IDS_LESS_THAN_2 "You must have two or more pre-installed layouts in your system."
     IDS_SWITCH_BUTTON "Switch"
 END

@@ -44,20 +44,63 @@ BOOL SimpleVerQueryValue(LPBYTE lpBlock, DWORD dwTranslate, LPCTSTR szSubBlock, 
     return FALSE;
 }
 
-void GetConfigPath(LPTSTR lpszBuffer)
+BOOL GetConfigPath(LPTSTR lpszBuffer, DWORD_PTR nBuffer)
 {
+    BOOL isRet = FALSE;
+    if (lpszBuffer == NULL || nBuffer == 0)
+    {
+        return isRet;
+    }
+    
     TCHAR szPath[MAX_PATH];
-    TCHAR szConfigName[MAX_LOADSTRING];
     GetModuleFileName(NULL, szPath, _countof(szPath));
-    LoadString(GetModuleHandle(NULL), IDS_CONFIG_PATH, szConfigName, _countof(szConfigName));
+    DWORD dwSize = GetFileVersionInfoSize(szPath, NULL);
+    if (dwSize == 0)
+    {
+        return isRet;
+    }
+    LPBYTE lpBlock = HeapAlloc(GetProcessHeap(),
+        HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, dwSize);
+    if (lpBlock == NULL)
+    {
+        return isRet;
+    }
+    if (!GetFileVersionInfo(szPath, 0, dwSize, lpBlock))
+    {
+        goto GetConfigPathEnd;
+    }
+    
+    LPVOID lpValue;
+    UINT uLen;
+    LPDWORD lpdwTranslate;
+
+    if (!VerQueryValue(lpBlock, _T("\\VarFileInfo\\Translation"), (LPVOID*)&lpdwTranslate, &uLen) ||
+        (uLen % sizeof(DWORD)) != 0)
+    {
+        goto GetConfigPathEnd;
+    }
+    
+    if (!SimpleVerQueryValue(lpBlock, *lpdwTranslate, _T("OriginalFilename"), &lpValue, &uLen))
+    {
+        goto GetConfigPathEnd;
+    }
+    
     PathRemoveFileSpec(szPath);
-    PathCombine(lpszBuffer, szPath, szConfigName);
+    PathCombine(szPath, szPath, (LPTSTR)lpValue);
+    PathRemoveExtension(szPath);
+    PathAddExtension(szPath, _T(".ini"));
+    StringCchCopy(lpszBuffer, nBuffer, szPath);
+    isRet = TRUE;
+
+GetConfigPathEnd:
+    HeapFree(GetProcessHeap(), 0, lpBlock);
+    return isRet;
 }
 
 void LoadSettings(KS_USERDATA* lpUserData)
 {
     TCHAR szPath[MAX_PATH];
-    GetConfigPath(szPath);
+    GetConfigPath(szPath, _countof(szPath));
 
     lpUserData->isToggle = (BOOL)!!GetPrivateProfileInt(szTitle, _T("ToggleLayouts"), 0, szPath);
     lpUserData->uEscAction = GetPrivateProfileInt(szTitle, _T("EscapeAction"), 0, szPath);
@@ -68,7 +111,7 @@ void LoadSettings(KS_USERDATA* lpUserData)
 void SaveSettings(const KS_USERDATA userData)
 {
     TCHAR szPath[MAX_PATH];
-    GetConfigPath(szPath);
+    GetConfigPath(szPath, _countof(szPath));
 
     KS_WritePrivateProfileInt(szTitle, _T("ToggleLayouts"), (UINT)(userData.isToggle), szPath);
     KS_WritePrivateProfileInt(szTitle, _T("EscapeAction"), userData.uEscAction, szPath);
